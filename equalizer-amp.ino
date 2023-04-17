@@ -4,6 +4,8 @@
 #include <TFT_eSPI.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <WebSocketsServer.h>
+#include "webpage.h"
 
 // Create an instance of the TFT_eSPI library
 TFT_eSPI tft = TFT_eSPI();
@@ -16,12 +18,14 @@ const char* password = "pppppppp";
 int port = 80;
 
 WebServer server(port);
+WebSocketsServer webSocket = WebSocketsServer(81);
 
 TaskHandle_t serverTaskHandle;
 
 void serverTask(void* pvParameters) {
   for (;;) {
     server.handleClient();
+    webSocket.loop();
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
@@ -60,11 +64,14 @@ void setup() {
   Serial.println("Connected to WiFi");
 
   server.on("/", []() {
-    server.send(200, "text/html", "<html><body><h1>Hello, world!</h1></body></html>");
+    server.send(200, "text/html", webpage);
   });
 
   server.begin();
   Serial.println("Web server started");
+  webSocket.begin();
+  Serial.println("Web socket started");
+
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
   xTaskCreate(updateDisplay, "Update Display", 2048, NULL, 1, NULL);
