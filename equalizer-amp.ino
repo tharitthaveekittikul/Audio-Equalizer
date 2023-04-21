@@ -7,6 +7,7 @@
 #include <WebSocketsServer.h>
 #include <arduinoFFT.h>
 #include "webpage.h"
+#include <FastLED.h>
 // #include "FFT.h"
 // #include "Settings.h"
 // #include "I2SPLUGIN.h"
@@ -15,9 +16,14 @@
 #define NUM_POTENTIOMETERS 3
 const int potPins[NUM_POTENTIOMETERS] = { 34, 35, 32 };
 const String potNames[NUM_POTENTIOMETERS] = { "Treble", "Bass", "Volume" };
-const int changeThreshold = 50;
+const int changeThreshold = 40;
 
-int numBands = 64;
+// LED BAR
+#define NUM_LEDS 8
+#define LED_PIN 12
+CRGB leds[NUM_LEDS];
+
+// int numBands = 64;
 
 struct DisplayData {
   int pwmValue;
@@ -117,6 +123,17 @@ void readPotentiometers(void* parameter) {
         displayData[i] = { pwmValue, i };
         previousValues[i] = value;
         updateNeeded = true;
+        uint8_t ledCount = map(pwmValue, 0, 255, 0, NUM_LEDS);
+
+        for (int i = 0; i < NUM_LEDS; i++) {
+          if (i < ledCount) {
+            leds[i] = CRGB::White;  // Show LEDs if they are within the desired range
+          } else {
+            leds[i] = CRGB::Black;  // Turn off LEDs if they are outside the desired range
+          }
+        }
+
+        FastLED.show();
       }
     }
 
@@ -136,6 +153,8 @@ void setup() {
   for (int i = 0; i < NUM_POTENTIOMETERS; i++) {
     pinMode(potPins[i], INPUT);
   }
+  FastLED.addLeds<WS2812B, LED_PIN, GRB>(leds, NUM_LEDS);
+  FastLED.setBrightness(10);
 
   // Initialize TFT display
   tft.init();
@@ -165,11 +184,12 @@ void setup() {
   // Create the display data queue
   displayQueue = xQueueCreate(1, sizeof(DisplayData[NUM_POTENTIOMETERS]));
 
-  // Create the update display task
-  xTaskCreate(updateDisplay, "UpdateDisplay", 4096, NULL, 2, NULL);
-
   // Create the read potentiometers task
   xTaskCreate(readPotentiometers, "ReadPotentiometers", 4096, NULL, 1, NULL);
+
+  // Create the update display task
+  xTaskCreate(updateDisplay, "UpdateDisplay", 4096, NULL, 2, NULL);
+  // xTaskCreate(updateLED, "UpdateLED", 4096, NULL, 2, NULL);
 
   // xTaskCreate(updateDisplay, "Update Display", 4096, NULL, 1, NULL);
   // xTaskCreate(serverTask, "serverTask", 4096, NULL, 1, &serverTaskHandle);
