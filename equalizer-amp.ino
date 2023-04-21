@@ -12,9 +12,9 @@
 // #include "I2SPLUGIN.h"
 
 // Potentiometers
-#define NUM_POTENTIOMETERS 4
+#define NUM_POTENTIOMETERS 3
 const int potPins[NUM_POTENTIOMETERS] = { 34, 35, 32 };
-const String potNames[NUM_POTENTIOMETERS] = { "Treble", "Bass", "Volumn" };
+const String potNames[NUM_POTENTIOMETERS] = { "Treble", "Bass", "Volume" };
 const int changeThreshold = 50;
 
 int numBands = 64;
@@ -67,51 +67,34 @@ void serverTask(void* pvParameters) {
 }
 
 void updateDisplay(void* parameter) {
-  // Initialize TFT display
-  tft.begin();
+  DisplayData displayData[NUM_POTENTIOMETERS];
   tft.fillScreen(TFT_BLACK);
-  tft.setCursor(0, 0);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
-  tft.println("Potentiometer");
-
-  TickType_t lastUpdate = xTaskGetTickCount();
 
   for (;;) {
-    DisplayData data;
 
-    if (xQueueReceive(displayQueue, &data, portMAX_DELAY) == pdTRUE) {
-      lastUpdate = xTaskGetTickCount();
+    if (xQueueReceive(displayQueue, &displayData, portMAX_DELAY) == pdPASS) {
 
-      tft.fillRect(0, 0, 200, 40, TFT_BLACK);
-      tft.setTextSize(2);
-      tft.setCursor(0, 0);
-      tft.print(potNames[data.potentiometerNumber]);
-      tft.setCursor(0, 20);
-      tft.print("Value: ");
-      tft.print(data.pwmValue * 100 / 255);
-      tft.print(" %");
+      for (int i = 0; i < NUM_POTENTIOMETERS; i++) {
+        int xPos = i * 80;
+        // Potentiometer Name
+        tft.setCursor(xPos, 20);
+        tft.print(potNames[displayData[i].potentiometerNumber]);
 
-      // Draw progress bar
-      uint16_t barHeight = map(data.pwmValue, 0, 255, 0, tft.height() - 40);
-      // x,y,width, height
-      tft.fillRect(tft.width() - 50, 0, 50, tft.height() - 40, TFT_BLACK);
-      tft.drawRect(tft.width() - 50, 0, 50, tft.height() - 40, TFT_WHITE);
-      tft.fillRect(tft.width() - 50, tft.height() - barHeight - 40, 50, barHeight, ILI9341_GREEN);
+        // Potentiometer Value
+        tft.setCursor(xPos, 40);
+        char formattedValue[10];
+        sprintf(formattedValue, "%3d %%", displayData[i].pwmValue * 100 / 255);
+        tft.print(formattedValue);
+
+        // Draw progress bar
+        uint16_t barHeight = map(displayData[i].pwmValue, 0, 255, 0, tft.height() - 60);
+        tft.fillRect(xPos, 60, 50, tft.height() - 60, TFT_BLACK);
+        // tft.drawRect(xPos, 60, 50, tft.height() - 60, TFT_WHITE);
+        tft.fillRect(xPos, tft.height() - barHeight, 50, barHeight, ILI9341_GREEN);
+      }
     }
-
-    // Check if the display needs to be updated
-    if ((xTaskGetTickCount() - lastUpdate) >= pdMS_TO_TICKS(50)) {
-      tft.fillRect(0, 0, 200, 40, ILI9341_BLACK);
-      tft.setTextSize(2);
-      tft.setCursor(0, 0);
-      tft.print("Potentiometer");
-      tft.setCursor(0, 20);
-      tft.print("not updated");
-      tft.fillRect(tft.width() - 20, 0, 20, tft.height(), ILI9341_BLACK);
-      // lastUpdate = xTaskGetTickCount();
-    }
-    vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
 
@@ -123,23 +106,28 @@ void readPotentiometers(void* parameter) {
   }
 
   for (;;) {
+    bool updateNeeded = false;
+    DisplayData displayData[NUM_POTENTIOMETERS];
+
     for (int i = 0; i < NUM_POTENTIOMETERS; i++) {
       int value = analogRead(potPins[i]);
       int pwmValue = map(value, 0, 4095, 0, 255);
 
       if (abs(value - previousValues[i]) > changeThreshold) {
-        DisplayData data = { pwmValue, i };
-        xQueueOverwrite(displayQueue, &data);
+        displayData[i] = { pwmValue, i };
         previousValues[i] = value;
+        updateNeeded = true;
       }
+    }
+
+    if (updateNeeded) {
+      xQueueSend(displayQueue, &displayData, portMAX_DELAY);
     }
 
     // Delay to avoid excessive CPU usage
     vTaskDelay(pdMS_TO_TICKS(100));
   }
 }
-
-
 
 void setup() {
   Serial.begin(115200);
@@ -151,7 +139,8 @@ void setup() {
 
   // Initialize TFT display
   tft.init();
-  tft.setRotation(3);
+  tft.setRotation(0);
+  // tft.fillScreen(TFT_BLACK);
 
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
@@ -172,9 +161,17 @@ void setup() {
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
-  displayQueue = xQueueCreate(1, sizeof(DisplayData));
-  xTaskCreate(readPotentiometers, "Read Potentiometers", 4096, NULL, 1, NULL);
-  xTaskCreate(updateDisplay, "Update Display", 4096, NULL, 1, NULL);
+
+  // Create the display data queue
+  displayQueue = xQueueCreate(1, sizeof(DisplayData[NUM_POTENTIOMETERS]));
+
+  // Create the update display task
+  xTaskCreate(updateDisplay, "UpdateDisplay", 4096, NULL, 2, NULL);
+
+  // Create the read potentiometers task
+  xTaskCreate(readPotentiometers, "ReadPotentiometers", 4096, NULL, 1, NULL);
+
+  // xTaskCreate(updateDisplay, "Update Display", 4096, NULL, 1, NULL);
   // xTaskCreate(serverTask, "serverTask", 4096, NULL, 1, &serverTaskHandle);
 }
 
