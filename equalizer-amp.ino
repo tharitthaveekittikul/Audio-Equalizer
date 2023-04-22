@@ -8,6 +8,7 @@
 #include <arduinoFFT.h>
 #include "webpage.h"
 #include <FastLED.h>
+#include <JC_Button.h>
 // #include "FFT.h"
 // #include "Settings.h"
 // #include "I2SPLUGIN.h"
@@ -22,6 +23,11 @@ const int changeThreshold = 40;
 #define NUM_LEDS 8
 #define LED_PIN 12
 CRGB leds[NUM_LEDS];
+
+// Button
+#define BUTTON_PIN 33
+Button button(BUTTON_PIN, 25, true, true);
+int buttonState = 0;
 
 // int numBands = 64;
 
@@ -79,27 +85,32 @@ void updateDisplay(void* parameter) {
   tft.setTextSize(2);
 
   for (;;) {
+    if (!buttonState) {
+      if (xQueueReceive(displayQueue, &displayData, portMAX_DELAY) == pdPASS) {
+        for (int i = 0; i < NUM_POTENTIOMETERS; i++) {
+          int xPos = i * 80;
+          // Potentiometer Name
+          tft.setCursor(xPos, 20);
+          tft.print(potNames[displayData[i].potentiometerNumber]);
 
-    if (xQueueReceive(displayQueue, &displayData, portMAX_DELAY) == pdPASS) {
+          // Potentiometer Value
+          tft.setCursor(xPos, 40);
+          char formattedValue[10];
+          sprintf(formattedValue, "%3d %%", displayData[i].pwmValue * 100 / 255);
+          tft.print(formattedValue);
 
-      for (int i = 0; i < NUM_POTENTIOMETERS; i++) {
-        int xPos = i * 80;
-        // Potentiometer Name
-        tft.setCursor(xPos, 20);
-        tft.print(potNames[displayData[i].potentiometerNumber]);
-
-        // Potentiometer Value
-        tft.setCursor(xPos, 40);
-        char formattedValue[10];
-        sprintf(formattedValue, "%3d %%", displayData[i].pwmValue * 100 / 255);
-        tft.print(formattedValue);
-
-        // Draw progress bar
-        uint16_t barHeight = map(displayData[i].pwmValue, 0, 255, 0, tft.height() - 60);
-        tft.fillRect(xPos, 60, 50, tft.height() - 60, TFT_BLACK);
-        // tft.drawRect(xPos, 60, 50, tft.height() - 60, TFT_WHITE);
-        tft.fillRect(xPos, tft.height() - barHeight, 50, barHeight, ILI9341_GREEN);
+          // Draw progress bar
+          uint16_t barHeight = map(displayData[i].pwmValue, 0, 255, 0, tft.height() - 60);
+          tft.fillRect(xPos, 60, 50, tft.height() - 60, TFT_BLACK);
+          tft.fillRect(xPos, tft.height() - barHeight, 50, barHeight, ILI9341_GREEN);
+        }
       }
+    } else {
+      tft.fillScreen(TFT_BLACK);
+      tft.setTextColor(TFT_WHITE, TFT_BLACK);
+      tft.setTextSize(2);
+      tft.setCursor(0, 20);
+      tft.print("Frequency");
     }
   }
 }
@@ -125,12 +136,8 @@ void readPotentiometers(void* parameter) {
         updateNeeded = true;
         uint8_t ledCount = map(pwmValue, 0, 255, 0, NUM_LEDS);
 
-        for (int i = 0; i < NUM_LEDS; i++) {
-          if (i < ledCount) {
-            leds[i] = CRGB::White;  // Show LEDs if they are within the desired range
-          } else {
-            leds[i] = CRGB::Black;  // Turn off LEDs if they are outside the desired range
-          }
+        for (int j = 0; j < NUM_LEDS; j++) {
+          leds[j] = (j < ledCount) ? CRGB::White : CRGB::Black;
         }
 
         FastLED.show();
@@ -146,6 +153,18 @@ void readPotentiometers(void* parameter) {
   }
 }
 
+void stateChange(void* parameter) {
+  for (;;) {
+    button.read();
+
+    if (button.wasPressed()) {
+      buttonState = !buttonState;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+}
+
+
 void setup() {
   Serial.begin(115200);
 
@@ -160,6 +179,9 @@ void setup() {
   tft.init();
   tft.setRotation(0);
   // tft.fillScreen(TFT_BLACK);
+
+  // Button Setup
+  button.begin();
 
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
@@ -189,6 +211,8 @@ void setup() {
 
   // Create the update display task
   xTaskCreate(updateDisplay, "UpdateDisplay", 4096, NULL, 2, NULL);
+
+  // xTaskCreate(stateChange, "Change state button", 2048, NULL, 2, NULL);
   // xTaskCreate(updateLED, "UpdateLED", 4096, NULL, 2, NULL);
 
   // xTaskCreate(updateDisplay, "Update Display", 4096, NULL, 1, NULL);
